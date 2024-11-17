@@ -101,15 +101,15 @@ func runTestVector(t *testing.T, vector *testVector) {
 		copy(csecret[:], secret)
 
 		// Encode the test vector.
-		blocks, rc, err := Encode(
-			bytes.NewReader(content),
-			csecret,
-			vector.BlockSize,
-		)
-		if err != nil {
-			t.Errorf("encoding: %v", err)
-			return
+		var blocks [][]byte
+		enc := NewEncoder(bytes.NewReader(content), csecret, vector.BlockSize)
+		for enc.Next() {
+			blocks = append(blocks, enc.Block())
 		}
+		if err := enc.Err(); err != nil {
+			t.Fatalf("error encoding: %v", err)
+		}
+		rc := enc.Capability()
 
 		// Check that the read capability matches the expected value.
 		if rc.BlockSize != vector.ReadCapability.BlockSize {
