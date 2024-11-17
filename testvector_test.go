@@ -2,8 +2,10 @@ package eris
 
 import (
 	"bytes"
+	"context"
 	"encoding/base32"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,6 +87,10 @@ func runTestVector(t *testing.T, vector *testVector) {
 	t.Logf("Running test vector %q", vector.Name)
 	t.Logf("Description: %s", vector.Description)
 
+	if vector.Type != "positive" && vector.Type != "negative" {
+		t.Fatalf("unexpected test vector type: %q", vector.Type)
+	}
+
 	t.Run("Encode", func(t *testing.T) {
 		// Only test encoding for 'positive' test vectors, which are expected to succeed.
 		if vector.Type != "positive" {
@@ -153,6 +159,47 @@ func runTestVector(t *testing.T, vector *testVector) {
 			if !bytes.Equal(block, wantContents) {
 				t.Errorf("block contents mismatch for reference %q", blockRef32)
 			}
+		}
+	})
+
+	t.Run("Decode", func(t *testing.T) {
+		// Our fetch function just looks up and returns the block from
+		// the test vector, or an error if it's not found.
+		fetch := func(_ context.Context, ref Reference, buf []byte) ([]byte, error) {
+			ref32 := base32Enc.EncodeToString(ref[:])
+			block, ok := vector.Blocks[ref32]
+			if !ok {
+				return nil, fmt.Errorf("block %q not found", ref32)
+			}
+			return mustDecodeBase32(t, block), nil
+		}
+
+		// Construct a ReadCapability from the test vector.
+		rc := ReadCapability{
+			BlockSize: vector.ReadCapability.BlockSize,
+			Level:     vector.ReadCapability.Level,
+		}
+		copy(rc.Root.Reference[:], mustDecodeBase32(t, vector.ReadCapability.RootReference))
+		copy(rc.Root.Key[:], mustDecodeBase32(t, vector.ReadCapability.RootKey))
+
+		// Decode the test vector.
+		decoded, err := DecodeRecursive(context.Background(), fetch, rc)
+
+		// Depending on whether this is a positive or negative test vector, we either want an error or not.
+		if vector.Type == "positive" {
+			if err != nil {
+				t.Fatalf("error decoding: %v", err)
+			}
+
+			wantContent := mustDecodeBase32(t, vector.Content)
+			if !bytes.Equal(decoded, wantContent) {
+				t.Errorf("decoded content mismatch")
+			}
+		} else {
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			t.Logf("got expected error: %v", err)
 		}
 	})
 }

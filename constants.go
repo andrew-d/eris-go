@@ -24,6 +24,16 @@ const (
 //	The reference is the unkeyed Blake2b hash of the encrypted block (32 bytes)
 type Reference [ReferenceSize]byte
 
+// isZero returns true if the reference is all zeros.
+func (r Reference) isZero() bool {
+	for _, b := range r {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // Key is the encryption key required to decrypt the block of data. It is
 // defined in the ERIS specification as:
 //

@@ -290,40 +290,6 @@ func (e *Encoder) nextInternalNodes() stateRes {
 	return stateContinue
 }
 
-// appendPadInput will pad the given block to the given size, as per the ERIS
-// specification, and return the padded slice. The specification states that:
-//
-//	The procedure Pad(input, block-size) given input of length n adds a
-//	mandatory byte valued 0x80 (hexadecimal) to input followed by m <
-//	block-size bytes valued 0x00 such that n + m + 1 is the smallest
-//	multiple of block-size.
-//
-// This is the same as the padding used in libsodium, which is defined as the
-// ISO/IEC 7816-4 padding algorithm.
-func appendPadInput(buf []byte, blockSize int) []byte {
-	n := len(buf)
-	if n > blockSize {
-		panic("block too large")
-	}
-
-	// If we're already at the block size, we don't need to pad.
-	if n == blockSize {
-		return buf
-	}
-
-	// Calculate the number of bytes remaining to pad.
-	remaining := blockSize - n - 1
-
-	// Append the mandatory 0x80 byte.
-	buf = append(buf, 0x80)
-
-	// Append the remaining 0x00 bytes.
-	for i := 0; i < remaining; i++ {
-		buf = append(buf, 0x00)
-	}
-	return buf
-}
-
 // appendPadWithZeroes appends enough zero bytes to the given byte slice to
 // make it have a given length.
 func appendPadWithZeroes(buf []byte, length int) []byte {
@@ -412,7 +378,7 @@ func constructInternalNodes(referenceKeyPairs []ReferenceKeyPair, blockSize int)
 	}
 
 	// Compute arity
-	arity := blockSize / 64
+	arity := arity(blockSize)
 
 	// Initialize empty list of nodes to return
 	var nodes [][]byte
