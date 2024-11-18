@@ -88,8 +88,6 @@ func NewEncoder(content io.Reader, secret [ConvergenceSecretSize]byte, blockSize
 // This is currently not public because it's not clear if it's useful to
 // to consumers; we use it internally to reset the encoder when we're
 // doing benchmarks.
-//
-// TODO: add a test using 'reflect' that verifies that this clears everything.
 func (e *Encoder) reset(r io.Reader) {
 	e.state = 0
 	e.err = nil
@@ -267,7 +265,6 @@ func (e *Encoder) nextContent() stateRes {
 	// Otherwise, we're done reading the content. Transition to the next
 	// state.
 	e.state = 1
-	e.splitter = nil // free memory used by the split iterator
 	return stateContinue
 }
 
