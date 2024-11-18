@@ -8,8 +8,6 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-const extraChecks = true
-
 // Encoder is used to encode some content into the ERIS format: a set of
 // encrypted blocks, and a "read capability" that contains all the information
 // needed to read and decrypt the content.
