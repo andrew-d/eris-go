@@ -106,3 +106,13 @@ func (s *splitter) Err() error {
 func (s *splitter) Block() []byte {
 	return s.buf
 }
+
+// Reset will reset the splitter to read from the beginning of the given reader.
+// This will clear any error state and allow the splitter to be reused.
+//
+// The block size is not reset by this method.
+func (s *splitter) Reset(r io.Reader) {
+	s.r = r
+	s.err = nil
+	s.done = false
+}
