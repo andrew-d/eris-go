@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -19,7 +20,7 @@ var (
 	verbose bool
 
 	putFlagSet    = flag.NewFlagSet("put", flag.ExitOnError)
-	putSecretFlag = putFlagSet.String("secret", "", "convergence secret; empty is the zero secret")
+	putSecretFlag = putFlagSet.String("secret", "", "convergence secret in hex; empty is the zero secret")
 
 	getFlagSet = flag.NewFlagSet("get", flag.ExitOnError)
 	getOutFlag = getFlagSet.String("o", "", "output file; empty is stdout")
@@ -150,8 +151,8 @@ func putFile(dir, file string) error {
 		block := enc.Block()
 		ref := enc.Reference()
 
-		// Write the block to disk, keyed by the hex-encoded reference.
-		path := filepath.Join(dir, hex.EncodeToString(ref[:]))
+		// Write the block to disk, keyed by the encoded reference.
+		path := filepath.Join(dir, filenameForRef(ref))
 
 		// Create the file, but if it already exists, skip it since we
 		// know that the content is already there.
@@ -205,10 +206,10 @@ func getFile(dir, urn string, w io.Writer) error {
 	}
 
 	// Our fetch function will look up a file in the given directory by the
-	// hex-encoded value of the reference.
+	// encoded value of the reference.
 	var blocksRead int
 	fetch := func(_ context.Context, ref eris.Reference, buf []byte) ([]byte, error) {
-		path := filepath.Join(dir, hex.EncodeToString(ref[:]))
+		path := filepath.Join(dir, filenameForRef(ref))
 		f, err := os.Open(path)
 		if err != nil {
 			return nil, err
@@ -251,6 +252,14 @@ func getFile(dir, urn string, w io.Writer) error {
 	return nil
 }
 
+var base32Enc = base32.StdEncoding.WithPadding(base32.NoPadding)
+
+func filenameForRef(ref eris.Reference) string {
+	// The filename is the base32-encoded hash of the reference; this
+	// mimics the upstream ERIS specification for cloud storage.
+	return base32Enc.EncodeToString(ref[:])
+}
+
 func printUsage() {
 	fmt.Println("usage:")
 	fmt.Println("  erisdir is a utility to read and write ERIS-encoded files to/from a")
@@ -258,7 +267,7 @@ func printUsage() {
 	fmt.Println("")
 	fmt.Println("  a store directory contains zero or more files, each of which is a")
 	fmt.Println("  single ERIS block. each block is stored in a file with the name being")
-	fmt.Println("  the hex-encoded hash of that block's contents")
+	fmt.Println("  the base32-encoded hash of that block's contents")
 	fmt.Println("")
 	fmt.Println("commands:")
 	fmt.Println("  put [flags] <store-dir> <file>")
