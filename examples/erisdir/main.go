@@ -4,25 +4,46 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/andrew-d/eris-go"
 )
 
-var zeroSecret [eris.ConvergenceSecretSize]byte
+var (
+	secretFlag = flag.String("secret", "", "convergence secret for 'put'; empty is the zero secret")
+
+	secret [eris.ConvergenceSecretSize]byte
+)
 
 func main() {
+	flag.Usage = printUsage
+	flag.Parse()
 	if len(os.Args) < 4 {
-		printUsage()
+		flag.Usage()
 		os.Exit(1)
 	}
+	log.SetOutput(os.Stderr)
 
-	dir := os.Args[1]
-	cmd := os.Args[2]
-	arg := os.Args[3]
+	if *secretFlag != "" {
+		// Decode as hex.
+		dec, err := hex.DecodeString(*secretFlag)
+		if err != nil {
+			log.Fatalf("invalid secret: %v", err)
+		}
+		if len(dec) != eris.ConvergenceSecretSize {
+			log.Fatalf("invalid secret: expected %d bytes, got %d", eris.ConvergenceSecretSize, len(dec))
+		}
+		copy(secret[:], dec)
+	}
+
+	dir := flag.Arg(0)
+	cmd := flag.Arg(1)
+	arg := flag.Arg(2)
 
 	switch cmd {
 	case "put":
@@ -35,16 +56,9 @@ func main() {
 			fmt.Printf("error: %v", err)
 			os.Exit(1)
 		}
+	default:
+		log.Fatalf("unknown command %q", cmd)
 	}
-}
-
-func printUsage() {
-	fmt.Println("Usage:")
-	fmt.Println("  erisdir is a basic utility to read and write ERIS-encoded files to a")
-	fmt.Println("  store on disk. try one of the following commands:")
-	fmt.Println("")
-	fmt.Printf("  %s <directory> put <file>\n", os.Args[0])
-	fmt.Printf("  %s <directory> get <urn>\n", os.Args[0])
 }
 
 func putFile(dir, file string) error {
@@ -53,9 +67,12 @@ func putFile(dir, file string) error {
 		return fmt.Errorf("directory %s does not exist", dir)
 	}
 
-	// Open the given file. As a special case, if the file is "-", read from stdin.
-	var rdr io.Reader
+	var (
+		rdr       io.Reader
+		blockSize int = 32 * 1024
+	)
 	if file == "-" {
+		// As a special case, if the file is "-", read from stdin.
 		rdr = os.Stdin
 	} else {
 		f, err := os.Open(file)
@@ -63,10 +80,19 @@ func putFile(dir, file string) error {
 			return err
 		}
 		defer f.Close()
+
 		rdr = f
+
+		// If the file is less than 16KiB in size, then use 1KiB blocks
+		// to save on space.
+		fi, err := f.Stat()
+		if err == nil && fi.Size() < 16*1024 {
+			log.Printf("file is smaller than 16KiB, using 1KiB blocks")
+			blockSize = 1024
+		}
 	}
 
-	enc := eris.NewEncoder(rdr, zeroSecret, 32*1024)
+	enc := eris.NewEncoder(rdr, secret, blockSize)
 
 	var written, skipped int
 	for enc.Next() {
@@ -100,8 +126,8 @@ func putFile(dir, file string) error {
 		return fmt.Errorf("encoding error: %w", err)
 	}
 
-	fmt.Printf("wrote %d blocks, skipped %d\n", written, skipped)
-	fmt.Printf("%s\n", enc.Capability().MustURN())
+	log.Printf("wrote %d blocks, skipped %d", written, skipped)
+	fmt.Println(enc.Capability().MustURN())
 	return nil
 }
 
@@ -148,4 +174,16 @@ func getFile(dir, urn string, w io.Writer) error {
 	}
 
 	return nil
+}
+
+func printUsage() {
+	fmt.Println("Usage:")
+	fmt.Println("  erisdir is a basic utility to read and write ERIS-encoded files to a")
+	fmt.Println("  store on disk. try one of the following commands:")
+	fmt.Println("")
+	fmt.Printf("  %s <directory> put <file>\n", os.Args[0])
+	fmt.Printf("  %s <directory> get <urn>\n", os.Args[0])
+	fmt.Println("")
+	fmt.Println("flags:")
+	flag.PrintDefaults()
 }
