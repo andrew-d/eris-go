@@ -15,49 +15,84 @@ import (
 )
 
 var (
-	secretFlag = flag.String("secret", "", "convergence secret for 'put'; empty is the zero secret")
+	putFlagSet = flag.NewFlagSet("put", flag.ExitOnError)
+	secretFlag = putFlagSet.String("secret", "", "convergence secret; empty is the zero secret")
+
+	getFlagSet = flag.NewFlagSet("get", flag.ExitOnError)
+	outFlag    = getFlagSet.String("o", "", "output file; empty is stdout")
 
 	secret [eris.ConvergenceSecretSize]byte
 )
 
 func main() {
-	flag.Usage = printUsage
-	flag.Parse()
-	if len(os.Args) < 4 {
-		flag.Usage()
+	if len(os.Args) < 2 {
+		printUsage()
 		os.Exit(1)
 	}
 	log.SetOutput(os.Stderr)
 
-	if *secretFlag != "" {
-		// Decode as hex.
-		dec, err := hex.DecodeString(*secretFlag)
-		if err != nil {
-			log.Fatalf("invalid secret: %v", err)
-		}
-		if len(dec) != eris.ConvergenceSecretSize {
-			log.Fatalf("invalid secret: expected %d bytes, got %d", eris.ConvergenceSecretSize, len(dec))
-		}
-		copy(secret[:], dec)
-	}
-
-	dir := flag.Arg(0)
-	cmd := flag.Arg(1)
-	arg := flag.Arg(2)
-
+	cmd := os.Args[1]
 	switch cmd {
 	case "put":
-		if err := putFile(dir, arg); err != nil {
-			fmt.Printf("error: %v", err)
+		putFlagSet.Parse(os.Args[2:])
+		if *secretFlag != "" {
+			// Decode as hex.
+			dec, err := hex.DecodeString(*secretFlag)
+			if err != nil {
+				log.Fatalf("invalid secret: %v", err)
+			}
+			if len(dec) != eris.ConvergenceSecretSize {
+				log.Fatalf("invalid secret: expected %d bytes, got %d", eris.ConvergenceSecretSize, len(dec))
+			}
+			copy(secret[:], dec)
+		}
+
+		if putFlagSet.NArg() != 2 {
+			log.Printf("expected 2 arguments, got %d", putFlagSet.NArg())
+			printUsage()
 			os.Exit(1)
 		}
+
+		dir := putFlagSet.Arg(0)
+		input := putFlagSet.Arg(1)
+		if err := putFile(dir, input); err != nil {
+			log.Fatalf("error: %v", err)
+			os.Exit(1)
+		}
+
 	case "get":
-		if err := getFile(dir, arg, os.Stdout); err != nil {
-			fmt.Printf("error: %v", err)
+		getFlagSet.Parse(os.Args[2:])
+
+		var out io.Writer = os.Stdout
+		if *outFlag != "" {
+			// Create the output file; if it already exists, don't overwrite it.
+			f, err := os.OpenFile(*outFlag, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Fatalf("error creating output file: %v", err)
+			}
+			defer f.Close()
+			out = f
+		}
+
+		if getFlagSet.NArg() != 2 {
+			log.Printf("expected 2 arguments, got %d", getFlagSet.NArg())
+			printUsage()
 			os.Exit(1)
 		}
+
+		dir := getFlagSet.Arg(0)
+		urn := getFlagSet.Arg(1)
+		if err := getFile(dir, urn, out); err != nil {
+			log.Fatalf("error: %v", err)
+			os.Exit(1)
+		}
+
+	case "-h", "-help", "--help", "help":
+		printUsage()
+
 	default:
 		log.Fatalf("unknown command %q", cmd)
+		printUsage()
 	}
 }
 
@@ -177,13 +212,26 @@ func getFile(dir, urn string, w io.Writer) error {
 }
 
 func printUsage() {
-	fmt.Println("Usage:")
-	fmt.Println("  erisdir is a basic utility to read and write ERIS-encoded files to a")
-	fmt.Println("  store on disk. try one of the following commands:")
+	fmt.Println("usage:")
+	fmt.Println("  erisdir is a utility to read and write ERIS-encoded files to/from a")
+	fmt.Println("  store on disk")
 	fmt.Println("")
-	fmt.Printf("  %s <directory> put <file>\n", os.Args[0])
-	fmt.Printf("  %s <directory> get <urn>\n", os.Args[0])
+	fmt.Println("  a store directory contains zero or more files, each of which is a")
+	fmt.Println("  single ERIS block. each block is stored in a file with the name being")
+	fmt.Println("  the hex-encoded hash of that block's contents")
 	fmt.Println("")
-	fmt.Println("flags:")
-	flag.PrintDefaults()
+	fmt.Println("commands:")
+	fmt.Println("  put [flags] <store-dir> <file>")
+	fmt.Println("    write the given file to the store directory and print its ERIS URN")
+	fmt.Println("")
+	fmt.Println("    flags:")
+	fmt.Println("      -secret <secret>")
+	fmt.Println("        the convergence secret to use when writing the file")
+	fmt.Println("")
+	fmt.Println("  get [flags] <store-dir> <urn>")
+	fmt.Println("    read the file with the given ERIS URN from the store directory")
+	fmt.Println("")
+	fmt.Println("    flags:")
+	fmt.Println("      -o <path>")
+	fmt.Println("        write the output to the given file instead of stdout")
 }
