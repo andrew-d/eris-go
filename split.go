@@ -64,7 +64,7 @@ func (s *splitter) Next() bool {
 		}
 
 		// Partial block; pad it and yield it.
-		s.buf = appendPadInput(s.buf[:n], s.blockSize)
+		padBlock(s.buf, n, s.blockSize)
 		if extraChecks && len(s.buf) != s.blockSize {
 			panic("unexpected padding length")
 		}
@@ -81,7 +81,7 @@ func (s *splitter) Next() bool {
 
 		// Yield a fully-padded block to indicate the
 		// end of the content, then finish.
-		s.buf = appendPadInput(s.buf[:0], s.blockSize)
+		padBlock(s.buf, 0, s.blockSize)
 		if extraChecks && len(s.buf) != s.blockSize {
 			panic("unexpected padding length")
 		}

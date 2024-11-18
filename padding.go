@@ -1,7 +1,7 @@
 package eris
 
-// appendPadInput will pad the given block to the given size, as per the ERIS
-// specification, and return the padded slice. The specification states that:
+// padBlock will add padding to the given block starting at 'start', as per the
+// ERIS specification. The specification states that:
 //
 //	The procedure Pad(input, block-size) given input of length n adds a
 //	mandatory byte valued 0x80 (hexadecimal) to input followed by m <
@@ -10,28 +10,29 @@ package eris
 //
 // This is the same as the padding used in libsodium, which is defined as the
 // ISO/IEC 7816-4 padding algorithm.
-func appendPadInput(buf []byte, blockSize int) []byte {
+//
+// We pad in-place vs. appending and returning a new slice since benchmarks
+// show that it is a little bit fater.
+func padBlock(buf []byte, start, blockSize int) {
 	n := len(buf)
 	if n > blockSize {
 		panic("block too large")
 	}
+	if start < 0 || start > n {
+		panic("invalid start")
+	}
 
 	// If we're already at the block size, we don't need to pad.
-	if n == blockSize {
-		return buf
+	if start == blockSize {
+		return
 	}
 
-	// Calculate the number of bytes remaining to pad.
-	remaining := blockSize - n - 1
-
-	// Append the mandatory 0x80 byte.
-	buf = append(buf, 0x80)
-
-	// Append the remaining 0x00 bytes.
-	for i := 0; i < remaining; i++ {
-		buf = append(buf, 0x00)
+	// Add the padding start byte to the buffer, then fill the rest with
+	// zero.
+	buf[start] = 0x80
+	for i := start + 1; i < blockSize; i++ {
+		buf[i] = 0x00
 	}
-	return buf
 }
 
 // removePadding will remove the padding from the given block, as per the ERIS
