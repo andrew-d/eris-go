@@ -82,6 +82,40 @@ func NewEncoder(content io.Reader, secret [ConvergenceSecretSize]byte, blockSize
 	}
 }
 
+// reset will reset the encoder to its initial state, using the given reader
+// as the new content to encode. The secret and block size are not changed.
+//
+// This is currently not public because it's not clear if it's useful to
+// to consumers; we use it internally to reset the encoder when we're
+// doing benchmarks.
+//
+// TODO: add a test using 'reflect' that verifies that this clears everything.
+func (e *Encoder) reset(r io.Reader) {
+	e.state = 0
+	e.err = nil
+	e.content = r
+	e.level = 0
+
+	// Clear, but don't reset, the blocks map
+	for k := range e.blocks {
+		delete(e.blocks, k)
+	}
+
+	// Clear some other internal state that we may or may not have set.
+	e.currBlock = nil
+	e.currRef = Reference{}
+	e.referenceKeyPairs = e.referenceKeyPairs[:0]
+	e.rootRefKey = ReferenceKeyPair{}
+	e.internalNodes = e.internalNodes[:0]
+	e.internalNodePos = 0
+
+	// Reset our splitter; we could also nil this out, but this avoids an
+	// allocation.
+	if e.splitter != nil {
+		e.splitter.Reset(r)
+	}
+}
+
 // Block returns the current block of data that was encoded.
 //
 // It is only valid to call this method after a call to the Next method has
