@@ -41,6 +41,9 @@ type Encoder struct {
 	// currBlock is the current block of data that was encoded.
 	currBlock []byte
 
+	// currRef is the current reference of the block of data that was encoded.
+	currRef Reference
+
 	// level is the current level of the ERIS tree.
 	level int
 
@@ -93,6 +96,21 @@ func (e *Encoder) Block() []byte {
 		return nil
 	}
 	return e.currBlock
+}
+
+// Reference returns the Reference of the current block of data that was
+// encoded.
+//
+// It is only valid to call this method after a call to the Next method has
+// returned true.
+func (e *Encoder) Reference() Reference {
+	if e.err != nil {
+		if extraChecks {
+			panic("cannot call Reference() after error")
+		}
+		return Reference{}
+	}
+	return e.currRef
 }
 
 // Err returns the error that caused the encoder to stop, if any.
@@ -176,6 +194,7 @@ func (e *Encoder) maybeEmitBlock(block []byte, ref Reference) bool {
 
 	e.blocks[ref] = true
 	e.currBlock = block
+	e.currRef = ref
 	return true
 }
 

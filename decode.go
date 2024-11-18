@@ -36,6 +36,7 @@ func arity(blockSize int) int {
 	return blockSize / (referenceKeyLen)
 }
 
+// dereferenceNode implements the Dereference-Node function from the spec.
 func dereferenceNode(
 	ctx context.Context,
 	fetch FetchFunc,
@@ -43,8 +44,15 @@ func dereferenceNode(
 	ref ReferenceKeyPair,
 	level, blockSize int,
 ) ([]byte, error) {
+	if extraChecks && len(buf) < blockSize {
+		panic(fmt.Sprintf(
+			"buf is too small (%d) for block size (%d)",
+			len(buf), blockSize,
+		))
+	}
+
 	// Fetch the block.
-	block, err := fetch(ctx, ref.Reference, buf)
+	block, err := fetch(ctx, ref.Reference, buf[:blockSize])
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +78,8 @@ func dereferenceNode(
 	return block, nil
 }
 
+// decodeInternalNode decodes an internal node from a decrypted block of data.
+// The length of the given slice must equal blockSize.
 func decodeInternalNode(data []byte, blockSize int) (refs []ReferenceKeyPair, err error) {
 	if len(data) != blockSize {
 		return nil, ErrInvalidBlockSize
@@ -104,8 +114,8 @@ func decodeInternalNode(data []byte, blockSize int) (refs []ReferenceKeyPair, er
 	return refs, nil
 }
 
-// DecodeRecursive decodes the content of an ERIS tree rooted at rc and returns
-// the content, or an error if the content could not be decoded.
+// DecodeRecursive recursively decodes the content of an ERIS tree rooted at rc
+// and returns the content, or an error if the content could not be decoded.
 //
 // The fetch function is called to fetch blocks of data from some backing
 // store; see the documentation for FetchFunc for the exact semantics.

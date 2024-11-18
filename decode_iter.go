@@ -13,9 +13,13 @@ type decodeNode struct {
 	level int
 }
 
-// Decoder is a streaming decode that can be used to decode an ERIS-encoded
-// stream of content into the original data. It is agnostic to how encrypted
-// blocks of data are fetched or how output is written.
+// Decoder provides a streaming interface that can be used to decode an ERIS-encoded
+// stream of content into the original data. Successive calls to the
+// [Decoder.Next] method will fetch blocks of the ERIS-encoded tree and decode
+// them, until a block of data has been retrieved or an error occurs.
+//
+// It is agnostic to how encrypted blocks of data are fetched or how output is
+// written, and it is up to the caller to perform these operations.
 type Decoder struct {
 	// fetch is the function that will be used to fetch encrypted blocks of data
 	fetch FetchFunc
@@ -51,7 +55,9 @@ type Decoder struct {
 	didInit bool
 }
 
-// NewDecoder creates a new Decoder instance.
+// NewDecoder creates a new Decoder instance which will use the provided fetch
+// function to fetch encrypted blocks of data, starting at the root of the tree
+// as described by rc.
 func NewDecoder(fetch FetchFunc, rc ReadCapability) *Decoder {
 	return &Decoder{
 		fetch: fetch,
@@ -218,6 +224,9 @@ func (d *Decoder) dereferenceNode(ctx context.Context, ref ReferenceKeyPair, lev
 }
 
 // Block returns the next block of the original content.
+//
+// The underlying array may point to data that will be overwritten by a
+// subsequent call to Next. It does no allocation.
 func (d *Decoder) Block() []byte {
 	if d.err != nil {
 		if extraChecks {

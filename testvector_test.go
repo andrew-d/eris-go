@@ -3,7 +3,6 @@ package eris
 import (
 	"bytes"
 	"context"
-	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -172,6 +171,25 @@ func testEncode(t *testing.T, vector *testVector) {
 		t.Errorf("ReadCapability root key mismatch: got %x, want %x", rc.Root.Key, wantRootKey)
 	}
 
+	// Ensure that the URN marshals to the expected value.
+	urn, err := rc.URN()
+	if err != nil {
+		t.Errorf("error marshaling URN: %v", err)
+	}
+	if urn != vector.URN {
+		t.Errorf("URN mismatch: got %q, want %q", urn, vector.URN)
+	}
+
+	// Unmarshal the vector's URN and verify that it also unmarshals and
+	// equals the ReadCapability that we just got.
+	rc2, err := ParseReadCapabilityURN(vector.URN)
+	if err != nil {
+		t.Errorf("error unmarshaling URN: %v", err)
+	}
+	if !rc2.Equal(rc) {
+		t.Errorf("ReadCapability mismatch after unmarshaling URN")
+	}
+
 	// Verify that we have exactly the same number of blocks as the
 	// test vector.
 	if len(blocks) != len(vector.Blocks) {
@@ -274,8 +292,6 @@ func testDecode(t *testing.T, vector *testVector) {
 		}
 	})
 }
-
-var base32Enc = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 func mustDecodeBase32(t *testing.T, input string) []byte {
 	t.Helper()
