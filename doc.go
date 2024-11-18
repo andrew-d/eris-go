@@ -14,4 +14,7 @@
 // expected to implement their own storage layer, which can be as simple as
 // files stored on-disk. Example(s) of how to use this package are provided in
 // the 'examples' directory.
+//
+// This package intentionally does not have any dependencies other than Go's
+// x/crypto library for cryptographic primitives.
 package eris
