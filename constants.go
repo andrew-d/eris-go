@@ -1,6 +1,8 @@
 package eris
 
 import (
+	"fmt"
+
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20"
 )
@@ -34,11 +36,23 @@ func (r Reference) isZero() bool {
 	return true
 }
 
+func (r Reference) String() string {
+	return fmt.Sprintf("%x", r[:])
+}
+
+func (r Reference) MarshalText() ([]byte, error) {
+	return []byte(r.String()), nil
+}
+
 // Key is the encryption key required to decrypt the block of data. It is
 // defined in the ERIS specification as:
 //
 //	key is the ChaCha20 key to decrypt the block (32 bytes)
 type Key [KeySize]byte
+
+func (k Key) String() string {
+	return fmt.Sprintf("%x", k[:])
+}
 
 // ReferenceKeyPair represents a pairing of a block reference and the key
 // required to decrypt the block.

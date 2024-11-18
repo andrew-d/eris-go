@@ -71,8 +71,8 @@ func dereferenceNode(
 }
 
 func decodeInternalNode(data []byte, blockSize int) (refs []ReferenceKeyPair, err error) {
-	if extraChecks && len(data) != blockSize {
-		panic("invalid data length")
+	if len(data) != blockSize {
+		return nil, ErrInvalidBlockSize
 	}
 
 	for i := 0; i < len(data); i += referenceKeyLen {
