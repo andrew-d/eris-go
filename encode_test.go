@@ -33,6 +33,9 @@ func TestEncoder_Reset(t *testing.T) {
 		"content":   true,
 		"blockSize": true,
 
+		// Safe to ignore, since it's always reset before being used.
+		"blakeHasher": true,
+
 		// Checked below
 		"splitter": true,
 	})
