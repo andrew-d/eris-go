@@ -10,21 +10,28 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/andrew-d/eris-go"
 )
 
 var (
-	putFlagSet = flag.NewFlagSet("put", flag.ExitOnError)
-	secretFlag = putFlagSet.String("secret", "", "convergence secret; empty is the zero secret")
+	verbose bool
+
+	putFlagSet    = flag.NewFlagSet("put", flag.ExitOnError)
+	putSecretFlag = putFlagSet.String("secret", "", "convergence secret; empty is the zero secret")
 
 	getFlagSet = flag.NewFlagSet("get", flag.ExitOnError)
-	outFlag    = getFlagSet.String("o", "", "output file; empty is stdout")
+	getOutFlag = getFlagSet.String("o", "", "output file; empty is stdout")
 
 	secret [eris.ConvergenceSecretSize]byte
 )
 
 func main() {
+	// Share the same verbose flag between the two commands.
+	putFlagSet.BoolVar(&verbose, "v", true, "verbose output")
+	getFlagSet.BoolVar(&verbose, "v", true, "verbose output")
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -35,9 +42,9 @@ func main() {
 	switch cmd {
 	case "put":
 		putFlagSet.Parse(os.Args[2:])
-		if *secretFlag != "" {
+		if *putSecretFlag != "" {
 			// Decode as hex.
-			dec, err := hex.DecodeString(*secretFlag)
+			dec, err := hex.DecodeString(*putSecretFlag)
 			if err != nil {
 				log.Fatalf("invalid secret: %v", err)
 			}
@@ -64,9 +71,9 @@ func main() {
 		getFlagSet.Parse(os.Args[2:])
 
 		var out io.Writer = os.Stdout
-		if *outFlag != "" {
+		if *getOutFlag != "" {
 			// Create the output file; if it already exists, don't overwrite it.
-			f, err := os.OpenFile(*outFlag, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+			f, err := os.OpenFile(*getOutFlag, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 			if err != nil {
 				log.Fatalf("error creating output file: %v", err)
 			}
@@ -96,6 +103,12 @@ func main() {
 	}
 }
 
+func verbosef(format string, args ...any) {
+	if verbose {
+		log.Printf(format, args...)
+	}
+}
+
 func putFile(dir, file string) error {
 	// If the dir is not a directory, return an error
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
@@ -122,12 +135,15 @@ func putFile(dir, file string) error {
 		// to save on space.
 		fi, err := f.Stat()
 		if err == nil && fi.Size() < 16*1024 {
-			log.Printf("file is smaller than 16KiB, using 1KiB blocks")
+			verbosef("file is smaller than 16KiB, using 1KiB blocks")
 			blockSize = 1024
 		}
 	}
 
-	enc := eris.NewEncoder(rdr, secret, blockSize)
+	// Create a wrapper that tells us how much we actually read.
+	stats := &statsReader{Reader: rdr}
+	enc := eris.NewEncoder(stats, secret, blockSize)
+	t0 := time.Now()
 
 	var written, skipped int
 	for enc.Next() {
@@ -161,7 +177,17 @@ func putFile(dir, file string) error {
 		return fmt.Errorf("encoding error: %w", err)
 	}
 
-	log.Printf("wrote %d blocks, skipped %d", written, skipped)
+	// Print some stats.
+	elapsed := time.Since(t0)
+	verbosef("successfully encoded file")
+	verbosef("stats:")
+	verbosef("  blocks written: %d", written)
+	verbosef("  blocks skipped: %d", skipped)
+	verbosef("  bytes read:     %d", stats.numBytes)
+	verbosef("  read calls:     %d", stats.numCalls)
+	verbosef("  elapsed time:   %v", elapsed)
+	verbosef("  encoding speed: %.2f MiB/s", float64(stats.numBytes)/elapsed.Seconds()/1024/1024)
+
 	fmt.Println(enc.Capability().MustURN())
 	return nil
 }
@@ -180,6 +206,7 @@ func getFile(dir, urn string, w io.Writer) error {
 
 	// Our fetch function will look up a file in the given directory by the
 	// hex-encoded value of the reference.
+	var blocksRead int
 	fetch := func(_ context.Context, ref eris.Reference, buf []byte) ([]byte, error) {
 		path := filepath.Join(dir, hex.EncodeToString(ref[:]))
 		f, err := os.Open(path)
@@ -193,21 +220,34 @@ func getFile(dir, urn string, w io.Writer) error {
 		if _, err := io.ReadFull(f, buf); err != nil {
 			return nil, err
 		}
+
+		blocksRead++
 		return buf, nil
 	}
 
 	// Iteratively decode the file, writing the blocks to the output writer.
 	ctx := context.Background()
 	dec := eris.NewDecoder(fetch, rc)
+	t0 := time.Now()
+	var bytesRead int64
 	for dec.Next(ctx) {
-		if _, err := w.Write(dec.Block()); err != nil {
+		block := dec.Block()
+		if _, err := w.Write(block); err != nil {
 			return fmt.Errorf("writing block: %w", err)
 		}
+		bytesRead += int64(len(block))
 	}
 	if err := dec.Err(); err != nil {
 		return fmt.Errorf("decoding error: %w", err)
 	}
 
+	elapsed := time.Since(t0)
+	verbosef("successfully decoded file")
+	verbosef("stats:")
+	verbosef("  blocks read:    %d", blocksRead)
+	verbosef("  bytes read:     %d", bytesRead)
+	verbosef("  elapsed time:   %v", elapsed)
+	verbosef("  decoding speed: %.2f MiB/s", float64(bytesRead)/elapsed.Seconds()/1024/1024)
 	return nil
 }
 
@@ -227,6 +267,8 @@ func printUsage() {
 	fmt.Println("    flags:")
 	fmt.Println("      -secret <secret>")
 	fmt.Println("        the convergence secret to use when writing the file")
+	fmt.Println("      -v")
+	fmt.Println("        verbose output")
 	fmt.Println("")
 	fmt.Println("  get [flags] <store-dir> <urn>")
 	fmt.Println("    read the file with the given ERIS URN from the store directory")
@@ -234,4 +276,19 @@ func printUsage() {
 	fmt.Println("    flags:")
 	fmt.Println("      -o <path>")
 	fmt.Println("        write the output to the given file instead of stdout")
+	fmt.Println("      -v")
+	fmt.Println("        verbose output")
+}
+
+type statsReader struct {
+	io.Reader
+	numCalls int64
+	numBytes int64
+}
+
+func (r *statsReader) Read(p []byte) (n int, err error) {
+	n, err = r.Reader.Read(p)
+	r.numCalls++
+	r.numBytes += int64(n)
+	return n, err
 }
