@@ -2,6 +2,7 @@ package eris
 
 import (
 	"fmt"
+	"hash"
 	"io"
 
 	"golang.org/x/crypto/blake2b"
@@ -53,6 +54,11 @@ type Encoder struct {
 	// tree. It is only valid when the encoder is in state 2.
 	rootRefKey ReferenceKeyPair
 
+	// blakeHasher is a hash.Hash that is initialized with
+	// blake2b.New256(convergenceSecret). It can be Reset and used to hash
+	// without allocating a new hasher on every block.
+	blakeHasher hash.Hash
+
 	// The following fields are used to store information in state 0
 
 	// splitter is used to chunk the input content into blocks.
@@ -72,13 +78,19 @@ type Encoder struct {
 }
 
 func NewEncoder(content io.Reader, secret [ConvergenceSecretSize]byte, blockSize int) *Encoder {
+	blakeHasher, err := blake2b.New256(secret[:])
+	if extraChecks && err != nil {
+		panic(err)
+	}
+
 	return &Encoder{
-		state:     0, // initial state
-		content:   content,
-		secret:    secret,
-		blockSize: blockSize,
-		blocks:    make(map[Reference]bool),
-		level:     0, // level starts at 0
+		state:       0, // initial state
+		content:     content,
+		secret:      secret,
+		blockSize:   blockSize,
+		blocks:      make(map[Reference]bool),
+		level:       0, // level starts at 0
+		blakeHasher: blakeHasher,
 	}
 }
 
@@ -112,6 +124,10 @@ func (e *Encoder) reset(r io.Reader) {
 	if e.splitter != nil {
 		e.splitter.Reset(r)
 	}
+
+	// Don't need to reset our Blake2b hasher, since encryptLeafNode always
+	// calls Reset before using it, but let's do that anyway for safety.
+	e.blakeHasher.Reset()
 }
 
 // Block returns the current block of data that was encoded.
@@ -238,8 +254,14 @@ func (e *Encoder) nextContent() stateRes {
 	for e.splitter.Next() {
 		data := e.splitter.Block()
 
-		// Encrypt the block
-		block, refKey := encryptLeafNode(data, e.secret)
+		// Encrypt the block; this overwrites the 'data' buffer and
+		// returns it, which means that we can't retain the buffer
+		// after the next call to splitter.Next().
+		//
+		// That's fine in this case, since we use the block in
+		// maybeEmitBlock and return if it's a new block, so the caller
+		// can use the buffer until the next call to Next().
+		block, refKey := encryptLeafNode(data, e.blakeHasher)
 
 		// Add the reference-key pair to the list of reference-key pairs. We
 		// need to do this even if we've already seen this block, since the
@@ -312,10 +334,7 @@ func (e *Encoder) nextInternalNodes() stateRes {
 	// Encrypt nodes to blocks and reference-key pairs. Repeat until we get
 	// a block that we haven't seen before.
 	for i := e.internalNodePos; i < len(e.internalNodes); i++ {
-		node := e.internalNodes[i]
-		block, refKey := encryptInternalNode(node, e.level, e.secret)
-
-		// TODO: can we zero out 'node' here to eagerly free memory?
+		block, refKey := encryptInternalNode(e.internalNodes[i], e.level)
 
 		// Add reference-key pair to list of reference-key pairs
 		e.referenceKeyPairs = append(e.referenceKeyPairs, refKey)
@@ -364,16 +383,15 @@ func appendPadWithZeroes(buf []byte, length int) []byte {
 	return append(buf, make([]byte, length-len(buf))...)
 }
 
-// encryptLeafNode encrypts the given leaf node with the convergence secret, and
-// returns the encrypted block along with the reference-key pair for the block.
-func encryptLeafNode(node []byte, convergenceSecret [ConvergenceSecretSize]byte) (block []byte, refKey ReferenceKeyPair) {
+// encryptLeafNode encrypts the given leaf node, and returns the encrypted
+// block along with the reference-key pair for the block.
+//
+// The given hasher is used to construct the key for this block; it should be
+// constructed using blake2b.New256(convergenceSecret), and will be reset
+// before use.
+func encryptLeafNode(node []byte, hasher hash.Hash) (block []byte, refKey ReferenceKeyPair) {
 	// Use the keyed Blake2b hash to compute the encryption key
-	//
-	// TODO: can cache and re-use this
-	hasher, err := blake2b.New256(convergenceSecret[:])
-	if extraChecks && err != nil {
-		panic(err)
-	}
+	hasher.Reset()
 	if _, err := hasher.Write(node); err != nil {
 		panic(err)
 	}
@@ -390,22 +408,19 @@ func encryptLeafNode(node []byte, convergenceSecret [ConvergenceSecretSize]byte)
 	//
 	// Per the ERIS spec, the 32 bit initial counter is set to null.
 	cipher, _ := chacha20.NewUnauthenticatedCipher(refKey.Key[:], nonce[:])
-
-	// TODO: can we reuse the node buffer?
-	block = make([]byte, len(node))
-	cipher.XORKeyStream(block, node)
+	cipher.XORKeyStream(node, node)
 
 	// Compute the reference to the encrypted block using unkeyed Blake2b
-	refKey.Reference = blake2b.Sum256(block)
+	refKey.Reference = blake2b.Sum256(node)
 
 	// All done!
-	return block, refKey
+	return node, refKey
 }
 
 // encryptInternalNode is used to encrypt internal nodes (level 1 and above).
 // It takes an unencrypted node and the level of the node as input and returns
 // the encrypted block as well as a reference-key pair to the block.
-func encryptInternalNode(node []byte, level int, convergenceSecret [ConvergenceSecretSize]byte) (block []byte, refKey ReferenceKeyPair) {
+func encryptInternalNode(node []byte, level int) (block []byte, refKey ReferenceKeyPair) {
 	if level <= 0 {
 		panic("level must be at least 1")
 	}
@@ -423,14 +438,13 @@ func encryptInternalNode(node []byte, level int, convergenceSecret [ConvergenceS
 	// Encrypt node to block.
 	cipher, _ := chacha20.NewUnauthenticatedCipher(refKey.Key[:], nonce[:])
 
-	// TODO: can we reuse the node buffer?
-	block = make([]byte, len(node))
-	cipher.XORKeyStream(block, node)
+	// Reuse the 'node' buffer and encrypt in-place.
+	cipher.XORKeyStream(node, node)
 
 	// Compute the reference to the encrypted block using unkeyed Blake2b
-	refKey.Reference = blake2b.Sum256(block)
+	refKey.Reference = blake2b.Sum256(node)
 
-	return block, refKey
+	return node, refKey
 }
 
 // constructInternalNodes takes as input a non-empty list of reference-key
