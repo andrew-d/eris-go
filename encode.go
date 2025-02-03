@@ -346,6 +346,21 @@ func appendPadWithZeroes(buf []byte, length int) []byte {
 	} else if len(buf) == length {
 		return buf
 	}
+
+	// If the buffer's given capacity is already large enough, we can
+	// just slice it to the desired length, and then zero out the
+	// remaining bytes.
+	if cap(buf) >= length {
+		initialLen := len(buf)
+		buf = buf[:length]
+		for i := initialLen; i < length; i++ {
+			buf[i] = 0
+		}
+		return buf
+	}
+
+	// Otherwise, we need to allocate a new buffer and copy the old
+	// buffer into it.
 	return append(buf, make([]byte, length-len(buf))...)
 }
 
