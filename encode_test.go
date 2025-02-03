@@ -4,6 +4,7 @@ import (
 	"io"
 	"maps"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -96,4 +97,71 @@ func assertStructEmpty(t *testing.T, ss any, wantNonZero map[string]bool) {
 	if len(wantNonZero) > 0 {
 		t.Errorf("%s: fields in wantNonZero not found in type: %v", ty.Name(), maps.Keys(wantNonZero))
 	}
+}
+
+func TestAppendPadWithZeros(t *testing.T) {
+	testCases := []struct {
+		name string
+		buf  []byte
+		size int
+	}{
+		{name: "empty", buf: nil, size: 0},
+		{name: "empty-1024", buf: nil, size: 1024},
+		{name: "1024", buf: make([]byte, 1024), size: 1024},
+		{name: "spare-cap", buf: make([]byte, 0, 1024), size: 1024},
+		{name: "insufficient-cap", buf: make([]byte, 0, 1000), size: 1024},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Fill the buffer with non-zero values.
+			origLen := len(tc.buf)
+			for i := range tc.buf {
+				tc.buf[i] = 1
+			}
+
+			// Append padding.
+			buf := appendPadWithZeroes(tc.buf, tc.size)
+			if len(buf) != tc.size {
+				t.Errorf("error: len(buf) = %d, want %d", len(buf), tc.size)
+			}
+
+			// Verify that the original data is preserved.
+			for i := 0; i < origLen; i++ {
+				if buf[i] != 1 {
+					t.Errorf("error: buf[%d] = %d, want 1", i, buf[i])
+				}
+			}
+
+			// Verify that the padding is zeroed.
+			for i := origLen; i < len(buf); i++ {
+				if buf[i] != 0 {
+					t.Errorf("error: buf[%d] = %d, want 0", i, buf[i])
+				}
+			}
+		})
+	}
+
+	t.Run("Allocations", func(t *testing.T) {
+		// We expect a single allocation here, to grow the slice to the desired
+		// size. There should be no further allocations.
+		buf := make([]byte, 0, 1024)
+		nAllocs := testing.AllocsPerRun(1000, func() {
+			b := appendPadWithZeroes(buf, 1024)
+			runtime.KeepAlive(b)
+		})
+
+		if nAllocs > 1 {
+			t.Errorf("error: %f allocations, want 1", nAllocs)
+		}
+
+		// Padding a buffer that's already the right size should not allocate.
+		nAllocs = testing.AllocsPerRun(1000, func() {
+			b := appendPadWithZeroes(buf, 1024)
+			runtime.KeepAlive(b)
+		})
+		if nAllocs > 0 {
+			t.Errorf("error: %f allocations, want 0", nAllocs)
+		}
+	})
 }
