@@ -1,7 +1,7 @@
 module github.com/andrew-d/eris-go
 
-go 1.23.3
+go 1.24.0
 
-require golang.org/x/crypto v0.35.0
+require golang.org/x/crypto v0.45.0
 
-require golang.org/x/sys v0.30.0 // indirect
+require golang.org/x/sys v0.38.0 // indirect
